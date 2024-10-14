@@ -37,7 +37,7 @@ tm_shape(nz) +
   tm_dots(col = "red")
 ```
 
-## Use index filtering
+### Use index filtering
 ```{r}
 # subset nz heights data with those that intersect Canterbury
 c_height1 <- nz_height[canterbury, ] # filter rows based on those that intersect canterbury
@@ -46,15 +46,275 @@ c_height1 <- nz_height[canterbury, ] # filter rows based on those that intersect
 nz_height[canterbury, , op = st_disjoint]
 ```
 
-## Tidy filtering
+### Tidy filtering
 ```{r}
 c_height2 <- nz_height %>% 
   st_filter(y = canterbury, .predicate = st_intersects)
 ```
-c_height1 and c_height2 are the same 
+
+### SGBP filtering
+```{r}
+# sparse geometry binary predicate list, binary list almost(?)
+nz_height_sgbp <- st_intersects(x = nz_height, y = canterbury)
+
+# Turn into a T/F statement
+# convert to logical vector
+nz_height_logical <- lengths(nz_height_sgbp) > 0
+
+# filter based on logical vector
+c_height3 = nz_height[nz_height_logical, ]
+```
+
+### Check visually that they all look the same
+```{r}
+map1 <- tm_shape(nz) +
+  tm_polygons() +
+  tm_shape(canterbury) +
+  tm_fill(col = "darkgrey") +
+  tm_shape(c_height1) +
+  tm_dots(col = "red") +
+tm_layout(title = "Bracket subsetting")
+
+map2 <- tm_shape(nz) +
+  tm_polygons() +
+  tm_shape(canterbury) +
+  tm_fill(col = "darkgrey") +
+  tm_shape(c_height1) +
+  tm_dots(col = "red") +
+tm_layout(title = "st_filter()")
+
+map3 <- tm_shape(nz) +
+  tm_polygons() +
+  tm_shape(canterbury) +
+  tm_fill(col = "darkgrey") +
+  tm_shape(c_height3) +
+  tm_dots(col = "red") +
+tm_layout(title = "st_intersects()")
+
+tmap_arrange(map1, map2, map3, nrow = 1)
+```
+
+
+## Distance relationships
+```{r}
+nz_height_logical <- st_is_within_distance(nz_height, canterbury, 
+                      dist = units::set_units(1000, "km"),
+                      sparse = FALSE) # turns into a logical
+
+c_height4 <- nz_height[nz_height_logical, ] 
+```
+
+## Spatial joins
+```{r}
+st_join(nz_height, nz, join=st_intersects) %>% 
+  select(id = t50_fid, elevation, region = Name) %>% 
+  group_by(region) %>% 
+  summarise(n_points = n()) %>% 
+  st_drop_geometry()
+
+```
 
 ```{r}
-# sparse geometry binary predicate list
-nz_height_sgbp <- st_intersects(x = nz_height, y = canterbury)
+cycle_hire <- cycle_hire
+cycle_hire_osm <- cycle_hire_osm
+```
+
+```{r}
+tmap_mode("view")
+
+tm_shape(cycle_hire) +
+  tm_symbols(col = "red", alpha = 0.2) +
+tm_shape(cycle_hire_osm) +
+  tm_symbols(col = "blue", alpha = 0.2)
+```
+Points don't perfectly intersect, so opt for a distance based join
+
+```{r}
+cycle_hire_join <- st_join(cycle_hire, cycle_hire_osm,
+        st_is_within_distance, # how to join
+        dist= units::set_units(20, "m")) # any points within 20 m are the same
+```
+Every time you do a join there's the potential for data dimensions to change. How do you build nice workflows to catch when things break?
+
+```{r}
+is(nrow(cycle_hire) == nrow(cycle_hire_join)) {
+  print("join matches original data dimensions")
+} else {
+  warning("join does not match original data dimensions")
+}
+```
+
+# Geometry Operations
+
+## Aggregating
+```{r}
+# load US states
+us_states <- spData::us_states
+
+# summarize total population within each region
+regions1 <- us_states %>%
+  group_by(REGION) %>%
+  summarise(population = sum(total_pop_15, na.rm = TRUE))
+
+# alternative approach
+regions2 <- aggregate(x = us_states[, "total_pop_15"], # data and attribute to be aggregated
+                      by = list(us_states$REGION), # attribute to aggregate by
+                      FUN = sum, na.rm = TRUE) # aggregating function
+```
+
+```{r}
+tmap_mode("plot")
+tm_shape(us_states) +
+  tm_polygons() 
+
+tm_shape(regions1) +
+  tm_polygons() # unions each of the geometries
+```
+
+```{r}
+# combine geometries of western states
+us_west <- us_states[us_states$REGION == "West", ]
+us_west_union <- st_union(us_west) # external boundaries stay the same, internal boundaries disappear
+
+# combine geometries of Texas and western states
+texas <- us_states[us_states$NAME == "Texas", ]
+texas_union <- st_union(us_west_union, texas)
+```
+
+## Buffering
+
+```{r}
+#buffer the seine
+seine_buffer_5km <- st_buffer(seine, dist = 5000)
+seine_buffer_50km = st_buffer(seine, dist = 50000)
+seine_union <- st_union(seine_buffer_50km)
+```
+
+### Map the seine
+```{r}
+map1 <- tm_shape(seine_buffer_5km) +
+  tm_polygons() +
+  tm_shape(seine) +
+  tm_lines() +
+  tm_layout(title = "5km buffer")
+
+map2 <- tm_shape(seine_union) +
+  tm_polygons() +
+  tm_shape(seine) +
+  tm_lines() +
+  tm_layout(title = "50km buffer")
+
+tmap_arrange(map1, map2, nrow = 1)
+```
+
+```{r}
+# create buffer around high points
+nz_height_buffer <- st_buffer(nz_height, dist = 1000000)
+
+# filter buffered points with those that intersect Canterbury
+c_height5 <- nz_height_buffer %>%
+  st_filter(y = canterbury, .predicate = st_intersects)
+
+# check to see if results match previous approach
+if(nrow(c_height4) == nrow(c_height5)){
+  print("results from buffer approach match st_is_within_distance() approach")
+} else{
+  warning("approaches giving different results")
+}
+```
+
+## Clippingg
+
+```{r}
+# circle one
+x <- st_sfc(st_point(c(0, 1))) %>%
+  st_buffer(., dist = 1) %>%
+  st_as_sf()
+
+# circle two
+y <- st_sfc(st_point(c(1, 1))) %>%
+  st_buffer(., dist = 1) %>%
+  st_as_sf()
+
+bbox <- st_union(x, y)
+
+tm_shape(x, bbox=bbox) +
+  tm_borders(col = "red") +
+  tm_shape(y) +
+  tm_borders(col = "blue") +
+  tm_shape(intersection) +
+  tm_fill(col = "purple")
+
+intersection <- st_intersection(x, y)
+
+
+
+difference_x_y <- st_difference(x, y)
+difference_y_x <- st_difference(y, x)
+union <- st_union(x, y)
+sym_difference <- st_sym_difference(x, y)
+```
+
+```{r}
+# create random points
+bb <- st_bbox(st_union(x, y)) # create bounding box of x and y
+box <- st_as_sfc(bb)
+p <- st_sample(x = box, size = 100) %>% # randomly sample the bounding box
+  st_as_sf()
+
+# find intersection of x and y
+x_and_y <- st_intersection(x, y)
+
+# filter points
+# first approach: bracket subsetting
+p_xy1 = p[x_and_y, ]
+
+# second approach: st_filter()
+p_xy2 <- p %>%
+  st_filter(., x_and_y)
+
+# third approach: st_intersection()
+p_xy3 = st_intersection(p, x_and_y)
+```
+
+```{r}
+tm_shape(x, bbox=bbox) +
+  tm_borders(col = "red") +
+  tm_shape(y) +
+  tm_borders(col = "blue") +
+  tm_shape(p_xy1) +
+  tm_dots()
+```
+Helpful for figuring out how to remove and combine geographies in interesting ways
+
+## Centroids
+```{r}
+nz_centroid <- st_centroid(nz)
+nz_pos <- st_point_on_surface(nz)
+
+tm_shape(nz) +
+  tm_polygons() +
+  tm_shape(nz_centroid) +
+  tm_symbols(col = "red",
+             alpha = 0.5) +
+  tm_shape(nz_pos) +
+  tm_symbols(col = "blue",
+             alpha = 0.5) 
+```
+
+
+## Simplification
+```{r}
+seine_simple <- st_simplify(seine, dTolerance = 2000)  # 2000 m
+
+map1 <- tm_shape(seine) +
+  tm_lines() +
+  tm_layout("original")
+
+map2 <- tm_shape(seine_simple) +
+  tm_lines() +
+  tm_layout("st_simplify()")
+
+tmap_arrange(map1, map2, nrow = 1)
 ```
 
