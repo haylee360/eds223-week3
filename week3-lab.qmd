@@ -1,0 +1,60 @@
+---
+title: "EDS 223: Week 3"
+author: "Haylee Oyler"
+format: html
+editor: source
+execute:
+  warning: false
+  message: false
+editor_options: 
+  chunk_output_type: console
+---
+
+# Week 3 
+
+#### Load packages
+```{r}
+library(sf)
+library(tmap)
+library(tidyverse)
+library(spData)
+```
+
+## Spatial subsetting (filtering)
+```{r}
+#import and filter data
+nz <- spData::nz
+nz_height <- spData::nz_height
+canterbury <- nz %>% 
+  filter(Name == "Canterbury")
+
+# Map new zealand
+tm_shape(nz) +
+  tm_polygons()+
+  tm_shape(canterbury) +
+  tm_fill("darkgrey") +
+  tm_shape(nz_height) +
+  tm_dots(col = "red")
+```
+
+## Use index filtering
+```{r}
+# subset nz heights data with those that intersect Canterbury
+c_height1 <- nz_height[canterbury, ] # filter rows based on those that intersect canterbury
+
+# All highest points NOT in canterbury
+nz_height[canterbury, , op = st_disjoint]
+```
+
+## Tidy filtering
+```{r}
+c_height2 <- nz_height %>% 
+  st_filter(y = canterbury, .predicate = st_intersects)
+```
+c_height1 and c_height2 are the same 
+
+```{r}
+# sparse geometry binary predicate list
+nz_height_sgbp <- st_intersects(x = nz_height, y = canterbury)
+```
+
