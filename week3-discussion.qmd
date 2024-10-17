@@ -34,17 +34,96 @@ aves <- read_sf(here::here("data", "aves_observations_2020_2024.shp")) %>%
   st_transform("ESRI:102009")
 ```
 
+# Task one
+
 Find how many bird observations are within protected areas in Santa Barbara County
 - Show the different outputs from a spatial subset and a spatial join
 - Bonus Challenge: Try it out with a 5 km buffer around the protected areas too!
+## Subsetting
 ```{r}
-
+aves_pa_subset <- sb_protected_areas[aves, ]
+nrows(aves_pa_subset)
 ```
 
+```{r}
+tm_shape(sb_protected_areas) +
+  tm_polygons() +
+  tm_shape(aves_pa_subset) +
+  tm_dots()
+```
+
+## Joining
+```{r}
+aves_pa_join <- st_join(aves, sb_protected_areas) # keep all bird obs regardless of inside protected areas
+nrow(aves_pa_join) # keeps all the original info from aves
+# Keeps all our original data and associates new attributes to it. 
+```
+
+```{r}
+tm_shape(sb_protected_areas) +
+  tm_polygons() +
+  tm_shape(aves_pa_join) +
+  tm_dots()
+```
+
+
+## Buffer around PAs
+```{r}
+st_crs(sb_protected_areas)$units
+# m
+```
+
+```{r}
+PAs_5km <- st_buffer(sb_protected_areas, dist = 5000)
+```
+
+```{r}
+aves_5km <- PAs_5km[aves, ]
+nrow(aves_5km) #stretched the area of the polygons so it's larger 
+```
+
+# Task 2
 Find the protected areas within 15 km of a city in Santa Barbara County
 - Hint: Use dplyr::filter() to select a city from sb_city_boundaries
 - Explore the different outputs with st_intersects(), st_intersection(), and st_within()
 - Practice a distance-based join with st_is_within_distance()
+
+```{r}
+carp <- sb_city_boundaries %>% 
+  filter(NAME == "Carpinteria")
+
+pa_buffer <- st_buffer(carp, dist = 15000)
+
+pa_in_buffer <- pa_buffer[sb_protected_areas, ]
+```
+
+```{r}
+tm_shape(pa_buffer) +
+  tm_borders() +
+tm_shape(carp) +
+  tm_polygons() +
+tm_shape(pa_in_buffer) +
+  tm_borders()
+```
+
+
+```{r}
+pas_carp_intersect <- st_intersects(carp, 
+                                    sb_protected_areas, 
+                                    dist = units::set_units(15, "km"), 
+                                    sparse = FALSE)
+
+pas_within_carp_intersect <- sb_protected_areas[pas_carp_intersect, ]
+
+
+pas_within_carp_log <- st_is_within_distance(carp, 
+                                         sb_protected_areas, 
+                                         
+                                         sparse = FALSE)
+
+pas_within_carp <- sb_protected_areas[pas_within_carp_log, ]
+```
+
 
 Find the distance between your city of choice and a protected area of your choice
 - Note: st_distance() finds the distance between the geometries’ edges
